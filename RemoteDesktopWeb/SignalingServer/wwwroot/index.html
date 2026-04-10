@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC Remote Desktop</title>
+    <style>
+        body { font-family: sans-serif; margin: 20px; }
+        .section { margin-bottom: 20px; padding: 10px; border: 1px solid #ccc; border-radius: 5px; }
+        #remoteVideo { width: 100%; max-width: 800px; border: 1px solid black; background: #eee; }
+        button, input, textarea { margin-top: 5px; }
+        #myIdDisplay { font-weight: bold; color: blue; }
+        #statusDisplay { font-weight: bold; color: green; }
+    </style>
+</head>
+<body>
+    <h1>WebRTC Remote Desktop</h1>
+
+    <div class="section">
+        <h3>Connection</h3>
+        <p>Your Device ID: <span id="myIdDisplay">Connecting...</span></p>
+        <p>Status: <span id="statusDisplay">Disconnected</span></p>
+
+        <div>
+            <h4>Host (Share your screen)</h4>
+            <button id="btnShareScreen">Start Sharing</button>
+        </div>
+
+        <div style="margin-top: 15px;">
+            <h4>Client (Connect to a remote screen)</h4>
+            <input type="text" id="targetIdInput" placeholder="Enter Target Device ID">
+            <button id="btnConnect">Connect</button>
+        </div>
+    </div>
+
+    <div class="section">
+        <h3>Clipboard Sync</h3>
+        <textarea id="clipboardInput" rows="4" cols="50" placeholder="Type or paste text here..."></textarea><br>
+        <button id="btnSendClipboard">Send to Remote Clipboard</button>
+    </div>
+
+    <div class="section">
+        <h3>File Transfer</h3>
+        <input type="file" id="fileInput"><br>
+        <button id="btnSendFile">Send File</button>
+        <div id="fileDownloadArea" style="margin-top: 10px;">
+            <!-- Download links for received files will appear here -->
+        </div>
+    </div>
+
+    <div class="section">
+        <h3>Remote Screen</h3>
+        <video id="remoteVideo" autoplay playsinline></video>
+    </div>
+
+    <!-- SignalR Client -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.0/signalr.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
