@@ -3,6 +3,9 @@ using Microsoft.Extensions.DependencyInjection;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Bind to all network interfaces (e.g., http://*:5000)
+builder.WebHost.UseUrls("http://*:5000");
+
 // Add services to the container.
 builder.Services.AddSignalR();
 builder.Services.AddCors(options =>
