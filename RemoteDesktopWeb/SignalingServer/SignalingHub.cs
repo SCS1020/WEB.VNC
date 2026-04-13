@@ -64,13 +64,13 @@ public class SignalingHub : Hub
         await Clients.Client(connectionId).SendAsync("UpdateHostList", hosts);
     }
 
-    public async Task SendOffer(string targetConnectionId, string offer, string password)
+    public async Task SendOffer(string targetConnectionId, string offer, string password, string clientName)
     {
         if (ActiveHosts.TryGetValue(targetConnectionId, out var hostInfo))
         {
             if (hostInfo.Password == password)
             {
-                await Clients.Client(targetConnectionId).SendAsync("ReceiveOffer", Context.ConnectionId, offer);
+                await Clients.Client(targetConnectionId).SendAsync("ReceiveOffer", Context.ConnectionId, offer, clientName);
             }
             else
             {

@@ -38,15 +38,18 @@
             <div class="section">
                 <h3>Connection Status</h3>
                 <p>Status: <span id="statusDisplay">Disconnected</span></p>
+                <p id="connectedClientDisplay" style="display:none; color: #d9534f; font-weight: bold;"></p>
                 <button id="btnDisconnect" style="display:none; background-color: #ffcccc;">Disconnect</button>
             </div>
 
             <div class="section" id="remoteViewSection" style="display:none;">
                 <h3>Remote Screen</h3>
+                <p style="font-size: 0.8em; color: #666;">(Click video to enable keyboard control)</p>
                 <div class="video-container">
-                    <video id="remoteVideo" autoplay playsinline></video>
+                    <video id="remoteVideo" autoplay playsinline tabindex="0"></video>
                     <div id="remoteCursor"></div>
                 </div>
+                <button id="btnRequestScreenSwitch" style="margin-top: 10px;">Request Host to Switch Screen</button>
             </div>
 
             <div class="section" id="connectionSetupSection">

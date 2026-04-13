@@ -17,6 +17,7 @@ const configuration = {
 
 // UI Elements
 const statusDisplay = document.getElementById('statusDisplay');
+const connectedClientDisplay = document.getElementById('connectedClientDisplay');
 const btnShareScreen = document.getElementById('btnShareScreen');
 const btnStopSharing = document.getElementById('btnStopSharing');
 const pcNameInput = document.getElementById('pcNameInput');
@@ -26,6 +27,7 @@ const hostListArea = document.getElementById('hostListArea');
 const remoteViewSection = document.getElementById('remoteViewSection');
 const remoteVideo = document.getElementById('remoteVideo');
 const remoteCursor = document.getElementById('remoteCursor');
+const btnRequestScreenSwitch = document.getElementById('btnRequestScreenSwitch');
 const connectionSetupSection = document.getElementById('connectionSetupSection');
 const toolsPanel = document.getElementById('toolsPanel');
 
@@ -57,17 +59,27 @@ function showRemoteTools() {
     }
 }
 
-function hideRemoteTools() {
-    connectionSetupSection.style.display = 'block';
+function hideRemoteTools(preserveHostState = false) {
+    if (!preserveHostState) {
+        connectionSetupSection.style.display = 'block';
+        statusDisplay.innerText = "Disconnected";
+        if (localStream) {
+            localStream.getTracks().forEach(t => t.stop());
+            localStream = null;
+        }
+        btnShareScreen.style.display = 'inline-block';
+        btnStopSharing.style.display = 'none';
+        hubConnection.invoke("StopHosting");
+    } else {
+        statusDisplay.innerText = "Sharing registered. Waiting for another connection...";
+    }
+
     toolsPanel.style.display = 'none';
     remoteViewSection.style.display = 'none';
     btnDisconnect.style.display = 'none';
-    statusDisplay.innerText = "Disconnected";
+    connectedClientDisplay.style.display = 'none';
+    connectedClientDisplay.innerText = "";
 
-    if (localStream) {
-        localStream.getTracks().forEach(t => t.stop());
-        localStream = null;
-    }
     if (peerConnection) {
         peerConnection.close();
         peerConnection = null;
@@ -97,7 +109,10 @@ hubConnection.on("UpdateHostList", (hosts) => {
 
         const div = document.createElement('div');
         div.className = 'host-item';
-        div.innerHTML = `<span>${host.pcName}</span>`;
+
+        const span = document.createElement('span');
+        span.innerText = host.pcName; // Safely set text to prevent DOM XSS
+        div.appendChild(span);
 
         const btn = document.createElement('button');
         btn.innerText = "Connect";
@@ -109,10 +124,13 @@ hubConnection.on("UpdateHostList", (hosts) => {
     });
 });
 
-hubConnection.on("ReceiveOffer", async (senderId, offer) => {
+hubConnection.on("ReceiveOffer", async (senderId, offer, clientName) => {
     console.log("Received Offer from", senderId);
     connectedPeerId = senderId;
     isHost = true;
+
+    connectedClientDisplay.innerText = `${clientName || 'Unknown Client'} is connected and viewing your screen.`;
+    connectedClientDisplay.style.display = 'block';
 
     if (!localStream) {
         await startScreenShareInternal();
@@ -178,8 +196,13 @@ function createPeerConnection() {
         if (peerConnection.connectionState === 'connected') {
             statusDisplay.innerText = "Connected!";
         } else if (peerConnection.connectionState === 'disconnected' || peerConnection.connectionState === 'failed') {
-            alert("Peer disconnected.");
-            hideRemoteTools();
+            // If we are the host, just drop the peer connection but stay sharing.
+            if (isHost) {
+                hideRemoteTools(true);
+            } else {
+                alert("Host disconnected.");
+                hideRemoteTools(false);
+            }
         }
     };
 
@@ -252,22 +275,19 @@ async function startScreenShareInternal() {
     }
 }
 
-btnShareScreen.addEventListener('click', async () => {
+btnShareScreen.addEventListener('click', () => {
     const name = pcNameInput.value.trim();
     const pwd = passwordInput.value.trim();
 
     if (!name) { alert("Please enter a PC Name"); return; }
     if (!pwd || pwd.length < 6 || pwd.length > 20) { alert("Please enter a password between 6 and 20 characters"); return; }
 
-    try {
-        await startScreenShareInternal();
-        hubConnection.invoke("RegisterHost", name, pwd);
-        statusDisplay.innerText = "Sharing registered. Waiting for connection...";
-        btnShareScreen.style.display = 'none';
-        btnStopSharing.style.display = 'inline-block';
-    } catch (err) {
-        // Failed to get media
-    }
+    // Register as host, but defer screen selection until someone connects
+    hubConnection.invoke("RegisterHost", name, pwd);
+    statusDisplay.innerText = "Sharing registered. Waiting for connection before selecting screen...";
+    btnShareScreen.style.display = 'none';
+    btnStopSharing.style.display = 'inline-block';
+    isHost = true;
 });
 
 btnStopSharing.addEventListener('click', () => {
@@ -297,7 +317,8 @@ async function initiateConnection(targetId) {
     await peerConnection.setLocalDescription(offer);
 
     statusDisplay.innerText = "Connecting...";
-    hubConnection.invoke("SendOffer", connectedPeerId, JSON.stringify(offer), pwd);
+    const clientName = pcNameInput.value.trim() || "A Remote User";
+    hubConnection.invoke("SendOffer", connectedPeerId, JSON.stringify(offer), pwd, clientName);
 }
 
 
@@ -321,6 +342,25 @@ remoteVideo.addEventListener('click', (e) => {
     const y = (e.clientY - rect.top) / rect.height;
 
     dataChannel.send(JSON.stringify({ type: 'click', x, y }));
+});
+
+remoteVideo.addEventListener('keydown', (e) => {
+    if (!dataChannel || dataChannel.readyState !== 'open') return;
+    e.preventDefault(); // Stop page scrolling
+    dataChannel.send(JSON.stringify({ type: 'keydown', key: e.key, code: e.code }));
+});
+
+remoteVideo.addEventListener('keyup', (e) => {
+    if (!dataChannel || dataChannel.readyState !== 'open') return;
+    e.preventDefault();
+    dataChannel.send(JSON.stringify({ type: 'keyup', key: e.key, code: e.code }));
+});
+
+btnRequestScreenSwitch.addEventListener('click', () => {
+    if (dataChannel && dataChannel.readyState === 'open') {
+        dataChannel.send(JSON.stringify({ type: 'request-screen-switch' }));
+        alert("Requested screen switch from Host.");
+    }
 });
 
 
@@ -399,6 +439,14 @@ function handleDataChannelMessage(msg) {
         }
     } else if (msg.type === 'click') {
         console.log(`Remote click received: x=${msg.x}, y=${msg.y}`);
+    } else if (msg.type === 'keydown') {
+        console.log(`Remote keydown received: ${msg.key} (${msg.code})`);
+    } else if (msg.type === 'keyup') {
+        console.log(`Remote keyup received: ${msg.key} (${msg.code})`);
+    } else if (msg.type === 'request-screen-switch' && isHost) {
+        if (confirm("Remote user requested a screen switch. Share a new screen?")) {
+            switchScreen();
+        }
     } else if (msg.type === 'clipboard') {
         clipboardInput.value = msg.text;
         if (navigator.clipboard && window.isSecureContext) {
@@ -414,11 +462,17 @@ function handleDataChannelMessage(msg) {
         const received = new Blob(receiveBuffer, { type: incomingFileInfo.mime });
         receiveBuffer = [];
 
+        const url = URL.createObjectURL(received);
         const downloadLink = document.createElement('a');
-        downloadLink.href = URL.createObjectURL(received);
+        downloadLink.href = url;
         downloadLink.download = incomingFileInfo.name;
         downloadLink.textContent = `Download ${incomingFileInfo.name}`;
         downloadLink.style.display = 'block';
+
+        downloadLink.onclick = () => {
+            // Revoke object URL after a short delay to free memory
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        };
 
         fileDownloadArea.appendChild(downloadLink);
         console.log("File reception complete");
@@ -428,4 +482,35 @@ function handleDataChannelMessage(msg) {
 function handleFileChunk(data) {
     receiveBuffer.push(data);
     receivedSize += data.byteLength;
+}
+
+// Seamlessly switch screen
+async function switchScreen() {
+    try {
+        const newStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+        const newVideoTrack = newStream.getVideoTracks()[0];
+
+        // Find existing sender
+        const sender = peerConnection.getSenders().find(s => s.track.kind === 'video');
+        if (sender) {
+            await sender.replaceTrack(newVideoTrack);
+        }
+
+        // Stop old tracks
+        if (localStream) {
+            localStream.getTracks().forEach(t => t.stop());
+        }
+        localStream = newStream;
+
+        // Handle if user stops this new stream
+        newVideoTrack.onended = () => {
+             hideRemoteTools();
+             hubConnection.invoke("StopHosting");
+             btnShareScreen.style.display = 'inline-block';
+             btnStopSharing.style.display = 'none';
+        };
+
+    } catch (err) {
+        console.error("Screen switch failed or cancelled.", err);
+    }
 }
