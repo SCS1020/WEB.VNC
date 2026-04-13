@@ -11,38 +11,111 @@ let isHost = false;
 
 const configuration = {
     iceServers: [
-        { urls: "stun:stun.l.google.com:19302" } // Public STUN server for hole punching
+        { urls: "stun:stun.l.google.com:19302" }
     ]
 };
 
 // UI Elements
-const myIdDisplay = document.getElementById('myIdDisplay');
 const statusDisplay = document.getElementById('statusDisplay');
 const btnShareScreen = document.getElementById('btnShareScreen');
-const btnConnect = document.getElementById('btnConnect');
-const targetIdInput = document.getElementById('targetIdInput');
+const btnStopSharing = document.getElementById('btnStopSharing');
+const pcNameInput = document.getElementById('pcNameInput');
+const passwordInput = document.getElementById('passwordInput');
+const hostListArea = document.getElementById('hostListArea');
+
+const remoteViewSection = document.getElementById('remoteViewSection');
 const remoteVideo = document.getElementById('remoteVideo');
+const remoteCursor = document.getElementById('remoteCursor');
+const connectionSetupSection = document.getElementById('connectionSetupSection');
+const toolsPanel = document.getElementById('toolsPanel');
+
 const clipboardInput = document.getElementById('clipboardInput');
 const btnSendClipboard = document.getElementById('btnSendClipboard');
+
+const fileExpanderHeader = document.getElementById('fileExpanderHeader');
+const fileExpander = document.getElementById('fileExpander');
 const fileInput = document.getElementById('fileInput');
 const btnSendFile = document.getElementById('btnSendFile');
 const fileDownloadArea = document.getElementById('fileDownloadArea');
+const btnDisconnect = document.getElementById('btnDisconnect');
+
+// --- UI Interactions ---
+
+fileExpanderHeader.addEventListener('click', () => {
+    fileExpander.classList.toggle('open');
+});
+
+function showRemoteTools() {
+    connectionSetupSection.style.display = 'none';
+    toolsPanel.style.display = 'block';
+    btnDisconnect.style.display = 'inline-block';
+
+    if (!isHost) {
+        remoteViewSection.style.display = 'block';
+    } else {
+        statusDisplay.innerText = "You are sharing your screen.";
+    }
+}
+
+function hideRemoteTools() {
+    connectionSetupSection.style.display = 'block';
+    toolsPanel.style.display = 'none';
+    remoteViewSection.style.display = 'none';
+    btnDisconnect.style.display = 'none';
+    statusDisplay.innerText = "Disconnected";
+
+    if (localStream) {
+        localStream.getTracks().forEach(t => t.stop());
+        localStream = null;
+    }
+    if (peerConnection) {
+        peerConnection.close();
+        peerConnection = null;
+    }
+    connectedPeerId = null;
+}
+
+btnDisconnect.addEventListener('click', () => {
+    hideRemoteTools();
+});
 
 // --- SignalR Signaling ---
 
 hubConnection.on("ReceiveConnectionId", (id) => {
     myId = id;
-    myIdDisplay.innerText = myId;
+});
+
+hubConnection.on("UpdateHostList", (hosts) => {
+    hostListArea.innerHTML = '';
+    if (hosts.length === 0) {
+        hostListArea.innerHTML = '<p>No hosts available.</p>';
+        return;
+    }
+
+    hosts.forEach(host => {
+        if (host.connectionId === myId) return; // Don't show self
+
+        const div = document.createElement('div');
+        div.className = 'host-item';
+        div.innerHTML = `<span>${host.pcName}</span>`;
+
+        const btn = document.createElement('button');
+        btn.innerText = "Connect";
+        btn.style.width = 'auto';
+        btn.onclick = () => initiateConnection(host.connectionId);
+
+        div.appendChild(btn);
+        hostListArea.appendChild(div);
+    });
 });
 
 hubConnection.on("ReceiveOffer", async (senderId, offer) => {
     console.log("Received Offer from", senderId);
     connectedPeerId = senderId;
-    isHost = true; // The one receiving the offer is the Host (providing screen)
+    isHost = true;
 
-    // Auto-start screen share if not already started
     if (!localStream) {
-        await startScreenShare();
+        await startScreenShareInternal();
     }
 
     createPeerConnection();
@@ -51,20 +124,29 @@ hubConnection.on("ReceiveOffer", async (senderId, offer) => {
     await peerConnection.setLocalDescription(answer);
 
     hubConnection.invoke("SendAnswer", senderId, JSON.stringify(answer));
+    showRemoteTools();
 });
 
 hubConnection.on("ReceiveAnswer", async (senderId, answer) => {
     console.log("Received Answer from", senderId);
     await peerConnection.setRemoteDescription(new RTCSessionDescription(JSON.parse(answer)));
     statusDisplay.innerText = "Connected!";
+    showRemoteTools();
 });
 
 hubConnection.on("ReceiveIceCandidate", async (senderId, candidate) => {
     try {
-        await peerConnection.addIceCandidate(new RTCIceCandidate(JSON.parse(candidate)));
+        if (peerConnection) {
+            await peerConnection.addIceCandidate(new RTCIceCandidate(JSON.parse(candidate)));
+        }
     } catch (e) {
         console.error("Error adding received ice candidate", e);
     }
+});
+
+hubConnection.on("ConnectionFailed", (reason) => {
+    alert("Connection failed: " + reason);
+    hideRemoteTools();
 });
 
 hubConnection.start().then(() => {
@@ -86,32 +168,28 @@ function createPeerConnection() {
     peerConnection.onconnectionstatechange = event => {
         if (peerConnection.connectionState === 'connected') {
             statusDisplay.innerText = "Connected!";
-        } else if (peerConnection.connectionState === 'disconnected') {
-            statusDisplay.innerText = "Disconnected!";
+        } else if (peerConnection.connectionState === 'disconnected' || peerConnection.connectionState === 'failed') {
+            alert("Peer disconnected.");
+            hideRemoteTools();
         }
     };
 
-    // If I am the Host, add local stream tracks to PC
     if (isHost && localStream) {
         localStream.getTracks().forEach(track => {
             peerConnection.addTrack(track, localStream);
         });
     }
 
-    // If I am the Client, receive tracks
     peerConnection.ontrack = event => {
         if (!isHost) {
             remoteVideo.srcObject = event.streams[0];
         }
     };
 
-    // Data Channel Setup
     if (!isHost) {
-        // Client creates the data channel
         dataChannel = peerConnection.createDataChannel("controlChannel");
         setupDataChannel();
     } else {
-        // Host receives the data channel
         peerConnection.ondatachannel = event => {
             dataChannel = event.channel;
             setupDataChannel();
@@ -137,39 +215,68 @@ function setupDataChannel() {
 
 // --- Interaction Logic ---
 
-async function startScreenShare() {
+async function startScreenShareInternal() {
     try {
         localStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
-        isHost = true;
-        statusDisplay.innerText = "Screen shared. Waiting for connection...";
+        // Handle user stopping screen share via browser UI
+        localStream.getVideoTracks()[0].onended = () => {
+             hideRemoteTools();
+             hubConnection.invoke("StopHosting");
+             btnShareScreen.style.display = 'inline-block';
+             btnStopSharing.style.display = 'none';
+        };
     } catch (err) {
         console.error("Error sharing screen: ", err);
+        throw err;
     }
 }
 
 btnShareScreen.addEventListener('click', async () => {
-    await startScreenShare();
+    const name = pcNameInput.value.trim();
+    const pwd = passwordInput.value.trim();
+
+    if (!name) { alert("Please enter a PC Name"); return; }
+    if (!pwd || pwd.length > 5) { alert("Please enter a password (max 5 characters)"); return; }
+
+    try {
+        await startScreenShareInternal();
+        hubConnection.invoke("RegisterHost", name, pwd);
+        statusDisplay.innerText = "Sharing registered. Waiting for connection...";
+        btnShareScreen.style.display = 'none';
+        btnStopSharing.style.display = 'inline-block';
+    } catch (err) {
+        // Failed to get media
+    }
 });
 
-btnConnect.addEventListener('click', async () => {
-    connectedPeerId = targetIdInput.value;
-    if (!connectedPeerId) return;
+btnStopSharing.addEventListener('click', () => {
+    hubConnection.invoke("StopHosting");
+    if (localStream) {
+        localStream.getTracks().forEach(t => t.stop());
+        localStream = null;
+    }
+    btnShareScreen.style.display = 'inline-block';
+    btnStopSharing.style.display = 'none';
+    statusDisplay.innerText = "Disconnected";
+});
 
-    isHost = false; // The one initiating connection is the Client (viewer)
+async function initiateConnection(targetId) {
+    const pwd = prompt("Enter password for this PC:");
+    if (pwd === null) return; // User cancelled
+
+    connectedPeerId = targetId;
+    isHost = false;
     createPeerConnection();
 
     const offer = await peerConnection.createOffer();
     await peerConnection.setLocalDescription(offer);
 
     statusDisplay.innerText = "Connecting...";
-    hubConnection.invoke("SendOffer", connectedPeerId, JSON.stringify(offer));
-});
+    hubConnection.invoke("SendOffer", connectedPeerId, JSON.stringify(offer), pwd);
+}
 
 
 // --- Remote Control (Mouse Events) ---
-// Note: Actual OS-level control requires a native app on the Host side.
-// Web browsers cannot control the host OS mouse directly for security reasons.
-// We will send the coordinates over DataChannel to demonstrate communication.
 
 remoteVideo.addEventListener('mousemove', (e) => {
     if (!dataChannel || dataChannel.readyState !== 'open') return;
@@ -199,6 +306,8 @@ btnSendClipboard.addEventListener('click', () => {
         const text = clipboardInput.value;
         dataChannel.send(JSON.stringify({ type: 'clipboard', text: text }));
         console.log("Clipboard text sent");
+    } else {
+        alert("Not connected");
     }
 });
 
@@ -215,7 +324,6 @@ btnSendFile.addEventListener('click', () => {
 
     console.log(`Sending file: ${file.name} (${file.size} bytes)`);
 
-    // 1. Send file metadata
     dataChannel.send(JSON.stringify({
         type: 'file-start',
         name: file.name,
@@ -223,12 +331,9 @@ btnSendFile.addEventListener('click', () => {
         mime: file.type
     }));
 
-    // 2. Read and send chunks
-    const chunkSize = 16384; // 16KB
+    const chunkSize = 16384;
     let offset = 0;
     const reader = new FileReader();
-
-    // The threshold to pause writing
     const BUFFER_THRESHOLD = 65535;
 
     reader.onload = e => {
@@ -236,7 +341,6 @@ btnSendFile.addEventListener('click', () => {
         offset += e.target.result.byteLength;
         if (offset < file.size) {
             if (dataChannel.bufferedAmount > BUFFER_THRESHOLD) {
-                // Wait for the buffer to empty out before sending more
                 dataChannel.onbufferedamountlow = () => {
                     dataChannel.onbufferedamountlow = null;
                     readSlice(offset);
@@ -260,15 +364,21 @@ btnSendFile.addEventListener('click', () => {
 
 function handleDataChannelMessage(msg) {
     if (msg.type === 'mousemove') {
-        // If we were a native app, we'd move the OS mouse here.
-        // console.log(`Remote mouse move: x=${msg.x}, y=${msg.y}`);
+        // Only host should show the fake cursor
+        if (isHost && document.visibilityState === 'visible') {
+            remoteCursor.style.display = 'block';
+            // Note: In a real app, this would control the OS cursor.
+            // Here we just simulate it on the host's own screen view (if they had one).
+            // Since host doesn't see a <video> of themselves, we'll just log it.
+            // console.log(`Remote mouse move: x=${msg.x}, y=${msg.y}`);
+        }
     } else if (msg.type === 'click') {
-        // If we were a native app, we'd trigger OS click here.
-        console.log(`Remote click: x=${msg.x}, y=${msg.y}`);
+        console.log(`Remote click received: x=${msg.x}, y=${msg.y}`);
     } else if (msg.type === 'clipboard') {
-        // Update local clipboard UI and attempt to write to system clipboard
         clipboardInput.value = msg.text;
-        navigator.clipboard.writeText(msg.text).catch(err => console.error("Could not write to OS clipboard: ", err));
+        if (navigator.clipboard && window.isSecureContext) {
+            navigator.clipboard.writeText(msg.text).catch(err => console.error("Could not write to OS clipboard: ", err));
+        }
         console.log("Received clipboard text");
     } else if (msg.type === 'file-start') {
         incomingFileInfo = msg;
@@ -277,7 +387,7 @@ function handleDataChannelMessage(msg) {
         console.log(`Receiving file: ${msg.name}`);
     } else if (msg.type === 'file-end') {
         const received = new Blob(receiveBuffer, { type: incomingFileInfo.mime });
-        receiveBuffer = []; // clear buffer
+        receiveBuffer = [];
 
         const downloadLink = document.createElement('a');
         downloadLink.href = URL.createObjectURL(received);
@@ -293,5 +403,4 @@ function handleDataChannelMessage(msg) {
 function handleFileChunk(data) {
     receiveBuffer.push(data);
     receivedSize += data.byteLength;
-    // console.log(`Received chunk: ${data.byteLength} bytes. Total: ${receivedSize}`);
 }

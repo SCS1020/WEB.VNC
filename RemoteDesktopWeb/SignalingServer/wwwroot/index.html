@@ -5,52 +5,90 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WebRTC Remote Desktop</title>
     <style>
-        body { font-family: sans-serif; margin: 20px; }
+        body { font-family: sans-serif; margin: 20px; display: flex; flex-direction: column; }
+        .container { display: flex; gap: 20px; }
+        .left-panel { flex: 1; }
+        .right-panel { flex: 0 0 300px; }
         .section { margin-bottom: 20px; padding: 10px; border: 1px solid #ccc; border-radius: 5px; }
-        #remoteVideo { width: 100%; max-width: 800px; border: 1px solid black; background: #eee; }
-        button, input, textarea { margin-top: 5px; }
+        #remoteVideo { width: 100%; border: 1px solid black; background: #eee; cursor: none; }
+        button, input, textarea { margin-top: 5px; width: 100%; box-sizing: border-box; padding: 5px; }
         #myIdDisplay { font-weight: bold; color: blue; }
         #statusDisplay { font-weight: bold; color: green; }
+        .host-item { padding: 5px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
+
+        /* Expander for File Transfer */
+        .expander { border: 1px solid #ccc; border-radius: 5px; margin-bottom: 20px; }
+        .expander-header { background: #f0f0f0; padding: 10px; cursor: pointer; font-weight: bold; }
+        .expander-content { padding: 10px; display: none; }
+        .expander.open .expander-content { display: block; }
+
+        /* Simulated cursor for host view */
+        #remoteCursor {
+            width: 15px; height: 15px; background-color: red; border-radius: 50%;
+            position: absolute; display: none; pointer-events: none; z-index: 100;
+        }
+        .video-container { position: relative; display: inline-block; width: 100%; }
     </style>
 </head>
 <body>
     <h1>WebRTC Remote Desktop</h1>
 
-    <div class="section">
-        <h3>Connection</h3>
-        <p>Your Device ID: <span id="myIdDisplay">Connecting...</span></p>
-        <p>Status: <span id="statusDisplay">Disconnected</span></p>
+    <div class="container">
+        <div class="left-panel">
+            <div class="section">
+                <h3>Connection Status</h3>
+                <p>Status: <span id="statusDisplay">Disconnected</span></p>
+                <button id="btnDisconnect" style="display:none; background-color: #ffcccc;">Disconnect</button>
+            </div>
 
-        <div>
-            <h4>Host (Share your screen)</h4>
-            <button id="btnShareScreen">Start Sharing</button>
+            <div class="section" id="remoteViewSection" style="display:none;">
+                <h3>Remote Screen</h3>
+                <div class="video-container">
+                    <video id="remoteVideo" autoplay playsinline></video>
+                    <div id="remoteCursor"></div>
+                </div>
+            </div>
+
+            <div class="section" id="connectionSetupSection">
+                <div style="display:flex; gap: 20px;">
+                    <div style="flex:1; border-right: 1px solid #ccc; padding-right: 20px;">
+                        <h4>Share This PC</h4>
+                        <input type="text" id="pcNameInput" placeholder="Enter PC Name (e.g., My Desktop)">
+                        <input type="password" id="passwordInput" placeholder="Set Password (max 5 chars)" maxlength="5">
+                        <button id="btnShareScreen">Start Sharing</button>
+                        <button id="btnStopSharing" style="display:none;">Stop Sharing</button>
+                    </div>
+
+                    <div style="flex:1; padding-left: 20px;">
+                        <h4>Available PCs to Control</h4>
+                        <div id="hostListArea">
+                            <p>Loading...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
 
-        <div style="margin-top: 15px;">
-            <h4>Client (Connect to a remote screen)</h4>
-            <input type="text" id="targetIdInput" placeholder="Enter Target Device ID">
-            <button id="btnConnect">Connect</button>
+        <div class="right-panel" id="toolsPanel" style="display:none;">
+            <div class="section">
+                <h3>Clipboard Sync</h3>
+                <p style="font-size: 0.8em; color: #666;">Text sent here will be synced to the remote machine's clipboard (if supported) or shown below.</p>
+                <textarea id="clipboardInput" rows="4" placeholder="Type or paste text here..."></textarea>
+                <button id="btnSendClipboard">Send Text</button>
+            </div>
+
+            <div class="expander" id="fileExpander">
+                <div class="expander-header" id="fileExpanderHeader">File Transfer <span>▼</span></div>
+                <div class="expander-content" id="fileExpanderContent">
+                    <input type="file" id="fileInput">
+                    <button id="btnSendFile">Upload to Remote</button>
+                    <div id="fileDownloadArea" style="margin-top: 10px; border-top: 1px solid #ccc; padding-top: 10px;">
+                        <strong>Received Files:</strong>
+                        <!-- Download links will appear here -->
+                    </div>
+                </div>
+            </div>
         </div>
-    </div>
-
-    <div class="section">
-        <h3>Clipboard Sync</h3>
-        <textarea id="clipboardInput" rows="4" cols="50" placeholder="Type or paste text here..."></textarea><br>
-        <button id="btnSendClipboard">Send to Remote Clipboard</button>
-    </div>
-
-    <div class="section">
-        <h3>File Transfer</h3>
-        <input type="file" id="fileInput"><br>
-        <button id="btnSendFile">Send File</button>
-        <div id="fileDownloadArea" style="margin-top: 10px;">
-            <!-- Download links for received files will appear here -->
-        </div>
-    </div>
-
-    <div class="section">
-        <h3>Remote Screen</h3>
-        <video id="remoteVideo" autoplay playsinline></video>
     </div>
 
     <!-- SignalR Client -->
