@@ -55,14 +55,14 @@ function showRemoteTools() {
     if (!isHost) {
         remoteViewSection.style.display = 'block';
     } else {
-        statusDisplay.innerText = "You are sharing your screen.";
+        statusDisplay.innerText = "화면을 공유 중입니다.";
     }
 }
 
 function hideRemoteTools(preserveHostState = false) {
     if (!preserveHostState) {
         connectionSetupSection.style.display = 'block';
-        statusDisplay.innerText = "Disconnected";
+        statusDisplay.innerText = "연결 해제됨";
         if (localStream) {
             localStream.getTracks().forEach(t => t.stop());
             localStream = null;
@@ -71,7 +71,7 @@ function hideRemoteTools(preserveHostState = false) {
         btnStopSharing.style.display = 'none';
         hubConnection.invoke("StopHosting");
     } else {
-        statusDisplay.innerText = "Sharing registered. Waiting for another connection...";
+        statusDisplay.innerText = "연결 대기 중...";
     }
 
     toolsPanel.style.display = 'none';
@@ -129,7 +129,7 @@ hubConnection.on("ReceiveOffer", async (senderId, offer, clientName) => {
     connectedPeerId = senderId;
     isHost = true;
 
-    connectedClientDisplay.innerText = `${clientName || 'Unknown Client'} is connected and viewing your screen.`;
+    connectedClientDisplay.innerText = `원격 제어 중: [${clientName || '알 수 없는 접속자'}]`;
     connectedClientDisplay.style.display = 'block';
 
     if (!localStream) {
@@ -284,7 +284,7 @@ btnShareScreen.addEventListener('click', () => {
 
     // Register as host, but defer screen selection until someone connects
     hubConnection.invoke("RegisterHost", name, pwd);
-    statusDisplay.innerText = "Sharing registered. Waiting for connection before selecting screen...";
+    statusDisplay.innerText = "연결 대기 중...";
     btnShareScreen.style.display = 'none';
     btnStopSharing.style.display = 'inline-block';
     isHost = true;
@@ -324,8 +324,14 @@ async function initiateConnection(targetId) {
 
 // --- Remote Control (Mouse Events) ---
 
+let lastMouseMove = 0;
 remoteVideo.addEventListener('mousemove', (e) => {
     if (!dataChannel || dataChannel.readyState !== 'open') return;
+
+    // Throttle mousemove events to reduce latency/bandwidth
+    const now = Date.now();
+    if (now - lastMouseMove < 30) return; // ~30fps
+    lastMouseMove = now;
 
     const rect = remoteVideo.getBoundingClientRect();
     const x = (e.clientX - rect.left) / rect.width;
@@ -429,20 +435,29 @@ btnSendFile.addEventListener('click', () => {
 
 function handleDataChannelMessage(msg) {
     if (msg.type === 'mousemove') {
-        // Only host should show the fake cursor
-        if (isHost && document.visibilityState === 'visible') {
-            remoteCursor.style.display = 'block';
-            // Note: In a real app, this would control the OS cursor.
-            // Here we just simulate it on the host's own screen view (if they had one).
-            // Since host doesn't see a <video> of themselves, we'll just log it.
-            // console.log(`Remote mouse move: x=${msg.x}, y=${msg.y}`);
+        if (isHost) {
+            fetch('http://localhost:5005/api/input/mouse', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(msg)
+            }).catch(() => {});
         }
     } else if (msg.type === 'click') {
-        console.log(`Remote click received: x=${msg.x}, y=${msg.y}`);
-    } else if (msg.type === 'keydown') {
-        console.log(`Remote keydown received: ${msg.key} (${msg.code})`);
-    } else if (msg.type === 'keyup') {
-        console.log(`Remote keyup received: ${msg.key} (${msg.code})`);
+        if (isHost) {
+            fetch('http://localhost:5005/api/input/mouse', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(msg)
+            }).catch(() => {});
+        }
+    } else if (msg.type === 'keydown' || msg.type === 'keyup') {
+        if (isHost) {
+            fetch('http://localhost:5005/api/input/key', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(msg)
+            }).catch(() => {});
+        }
     } else if (msg.type === 'request-screen-switch' && isHost) {
         if (confirm("Remote user requested a screen switch. Share a new screen?")) {
             switchScreen();

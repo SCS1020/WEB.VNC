@@ -37,19 +37,19 @@
         <div class="left-panel">
             <div class="section">
                 <h3>Connection Status</h3>
-                <p>Status: <span id="statusDisplay">Disconnected</span></p>
+                <p>상태: <span id="statusDisplay">연결 해제됨</span></p>
                 <p id="connectedClientDisplay" style="display:none; color: #d9534f; font-weight: bold;"></p>
-                <button id="btnDisconnect" style="display:none; background-color: #ffcccc;">Disconnect</button>
+                <button id="btnDisconnect" style="display:none; background-color: #ffcccc;">연결 끊기</button>
             </div>
 
             <div class="section" id="remoteViewSection" style="display:none;">
-                <h3>Remote Screen</h3>
-                <p style="font-size: 0.8em; color: #666;">(Click video to enable keyboard control)</p>
+                <h3>원격 화면</h3>
+                <p style="font-size: 0.8em; color: #666;">(영상을 클릭하면 키보드 제어가 활성화됩니다)</p>
                 <div class="video-container">
                     <video id="remoteVideo" autoplay playsinline tabindex="0"></video>
                     <div id="remoteCursor"></div>
                 </div>
-                <button id="btnRequestScreenSwitch" style="margin-top: 10px;">Request Host to Switch Screen</button>
+                <button id="btnRequestScreenSwitch" style="margin-top: 10px;">화면 변경 요청 (특정 창/모니터 선택)</button>
             </div>
 
             <div class="section" id="connectionSetupSection">
