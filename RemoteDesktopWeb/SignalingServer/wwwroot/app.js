@@ -181,8 +181,11 @@ function createPeerConnection() {
     }
 
     peerConnection.ontrack = event => {
-        if (!isHost) {
-            remoteVideo.srcObject = event.streams[0];
+        if (!isHost && event.track.kind === 'video') {
+            if (!remoteVideo.srcObject) {
+                remoteVideo.srcObject = new MediaStream();
+            }
+            remoteVideo.srcObject.addTrack(event.track);
         }
     };
 
@@ -267,6 +270,10 @@ async function initiateConnection(targetId) {
     connectedPeerId = targetId;
     isHost = false;
     createPeerConnection();
+
+    // The client wants to receive video but is not sending any.
+    // We must explicitly add a video transceiver to the offer.
+    peerConnection.addTransceiver('video', { direction: 'recvonly' });
 
     const offer = await peerConnection.createOffer();
     await peerConnection.setLocalDescription(offer);
