@@ -153,6 +153,15 @@ hubConnection.start().then(() => {
     console.log("SignalR Connected");
 }).catch(err => console.error(err));
 
+// Fetch and pre-fill PC Name on load
+fetch('/api/pcname')
+    .then(res => res.json())
+    .then(data => {
+        if (data && data.pcName && !pcNameInput.value) {
+            pcNameInput.value = data.pcName;
+        }
+    })
+    .catch(err => console.error("Could not fetch PC Name:", err));
 
 // --- WebRTC Setup ---
 
@@ -219,6 +228,12 @@ function setupDataChannel() {
 // --- Interaction Logic ---
 
 async function startScreenShareInternal() {
+    // Screen sharing requires a Secure Context (HTTPS) or localhost
+    if (!window.isSecureContext) {
+        alert("Screen sharing requires a Secure Context. Please connect using HTTPS or localhost.");
+        throw new Error("Insecure context");
+    }
+
     try {
         localStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
         // Handle user stopping screen share via browser UI
@@ -230,6 +245,9 @@ async function startScreenShareInternal() {
         };
     } catch (err) {
         console.error("Error sharing screen: ", err);
+        if (err.name === 'NotAllowedError') {
+            alert("Permission to share screen was denied.");
+        }
         throw err;
     }
 }
@@ -239,7 +257,7 @@ btnShareScreen.addEventListener('click', async () => {
     const pwd = passwordInput.value.trim();
 
     if (!name) { alert("Please enter a PC Name"); return; }
-    if (!pwd || pwd.length > 5) { alert("Please enter a password (max 5 characters)"); return; }
+    if (!pwd || pwd.length < 6 || pwd.length > 20) { alert("Please enter a password between 6 and 20 characters"); return; }
 
     try {
         await startScreenShareInternal();
